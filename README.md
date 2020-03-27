@@ -3,14 +3,14 @@
 ## How To Run this app locally using docker
 
 1. Install docker on your machine https://docs.docker.com/
-## `docker build -f application/Dockerfile -t sample:prod .`
-## `docker run -it -p 80:80 --rm sample:prod`
+### `docker build -f application/Dockerfile -t sample:prod .`
+### `docker run -it -p 80:80 --rm sample:prod`
 
 ## How To Run this app locally using npm
 
-## `cd application` 
-## `npm install`
-## `npm start`
+### `cd application` 
+### `npm install`
+### `npm start`
 
 ## How to Deploy on AWS 
 
