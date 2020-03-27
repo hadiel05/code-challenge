@@ -1,10 +1,8 @@
 ## CI/CD using AWS for a React App 
 
 ## Demo Deployed on AWS 
-
-`http://myalb-preprod-1132910257.us-east-1.elb.amazonaws.com/`
-
-`http://myalb-prod-132355218.us-east-1.elb.amazonaws.com/`
+- [Preprod Demo](http://myalb-preprod-1132910257.us-east-1.elb.amazonaws.com)
+- [Production Demo](http://myalb-prod-132355218.us-east-1.elb.amazonaws.com)
 
 ## How To Run this app locally using docker
 
