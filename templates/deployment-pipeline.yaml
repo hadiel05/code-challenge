@@ -175,8 +175,8 @@ Resources:
               commands:
                 - echo Logging in to Amazon ECR...
                 - aws --version
-                - node --version
-                - npm --version
+                - npm install
+                - npm test
                 - $(aws ecr get-login --region $AWS_DEFAULT_REGION --no-include-email)
                 - REPOSITORY_URI=$(aws ssm get-parameter --name ECR_REPOSITORY_URI --query Parameter.Value | tr -d '"')
                 - s3_bucket=$(aws ssm get-parameter --name S3_ARTIFACT_BUCKET --query Parameter.Value | tr -d '"')
