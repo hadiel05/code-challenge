@@ -1,57 +1,58 @@
-import React, {Component} from 'react';
-import axios from 'axios';
+import React, { useState } from "react";
+import { Header } from "./components/Header";
+import { Loading } from "./components/Loading";
 
-class App extends React.Component {
-  // State will apply to the posts object which is set to loading by default
-  state = {
-    posts: [],
-    isLoading: true,
-    errors: null
+import axios from "axios";
+import { Button } from "antd";
+import { Row, Col } from "antd";
+import { CustomCard } from "./components/CustomCard";
+
+export const App = ({ url }) => {
+  const [posts, setData] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const fetchData = async () => {
+    const response = await axios(url);
+    if (response.status !== 200) return null;
+    setData(response.data.posts);
+    setIsLoading(false);
   };
-  // Now we're going to make a request for data using axios
-  getPosts() {
-    axios
-      // This is where the data is hosted
-      .get("https://s3-us-west-2.amazonaws.com/s.cdpn.io/3/posts.json")
-      // Once we get a response and store data, let's change the loading state
-      .then(response => {
-        this.setState({
-          posts: response.data.posts,
-          isLoading: false
-        });
-      })
-      // If we catch any errors connecting, let's update accordingly
-      .catch(error => this.setState({ error, isLoading: false }));
-  }
-  // Let's our app know we're ready to render the data
-  componentDidMount() {
-    this.getPosts();
-  }
-  // Putting that data to use
-  render() {
-    const { isLoading, posts } = this.state;
-    return (
-      <React.Fragment>
-        <h2>Random Post</h2>
-        <div>
+
+  return (
+    <>
+      <Row>
+        <Col span={12} offset={6}>
+          <Header title="Welcome To My CNN App" />
           {!isLoading ? (
-            posts.map(post => {
-              const { _id, title, content } = post;
+            posts.map(({ _id, title, content }) => {
               return (
-                <div key={_id}>
-                  <h2>{title}</h2>
-                  <p>{content}</p>
-                  <hr />
-                </div>
+                <CustomCard
+                  id={_id}
+                  title={title}
+                  content={content}
+                  isLoading={isLoading}
+                />
               );
             })
           ) : (
-            <p>Loading...</p>
+            <Loading isLoadig={!isLoading} />
           )}
-        </div>
-      </React.Fragment>
-    );
-  }
-}
-
-export default App;
+          <Row>
+            <Col span={8} />
+            <Col span={8}>
+              <Button
+                block
+                onClick={fetchData}
+                disabled={!isLoading}
+                data-testid="fetch-data"
+              >
+                Load Data
+              </Button>
+            </Col>
+            <Col span={8} />
+          </Row>
+        </Col>
+      </Row>
+    </>
+  );
+};
