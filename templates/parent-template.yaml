@@ -1,0 +1,163 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Create Code Challenge Infrastructure
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          default: "Network Configuration"
+        Parameters:
+          - CreateVPC
+          - VpcID
+          - PrivateSubnets
+          - ALBSubnets
+      -
+        Label:
+          default: "GitHub Configuration"
+        Parameters:
+          - GITHubToken
+          - GitHubRepo
+          - GitHubBranch
+          - GitHubUser
+      -
+        Label:
+          default: "CloudFormation Nested Templates"
+        Parameters:
+          - S3TemplatePath
+    ParameterLabels:
+      CreateVPC:
+        default: "Which VPC should this be deployed to?"
+
+Parameters:
+  GITHubToken:
+    Description: (Required) Credentials to create the Github webhooks for codepipeline
+    Type: String
+    NoEcho: true
+    AllowedPattern: ^[a-zA-Z0-9]*$
+
+  GitHubRepo:
+    Description: (Required) GitHub Repository Name
+    Type: String
+    Default: ''
+
+  GitHubBranch:
+    Description: (Required) GitHub Repository Branch
+    Type: String
+    Default: ''
+
+  GitHubUser:
+    Description: (Required) GitHub Username
+    Type: String
+    Default: ''
+
+  CreateVPC:
+    Description: By default this stack will create a new VPC
+    Type: String
+    AllowedValues:
+      - true
+      - false
+    Default: true
+
+  S3TemplatePath:
+    Description: S3 URL to reterieve initial nested template
+    Type: String
+    Default: hj-nested-cf-templates.s3.amazonaws.com
+
+  VpcID:
+    Type: String
+    Description: (Optional if CreateVPC is true) VpcId of your existing Virtual Private Cloud (VPC)
+    Default: ''
+
+  PrivateSubnets:
+    Description: (Optional if CreateVPC is true) Private SubnetId in comma delimited list format
+    Type: String
+    Default: ''
+
+  ALBSubnets:
+    Description: (Optional if CreateVPC is true) SubnetIds(private/public) in comma delimited list format to use for Load Balancer
+    Type: String
+    Default: ''
+
+Conditions:
+  EnableVPCCreation: !Equals
+    - !Ref CreateVPC
+    - true
+
+Resources:
+  ParameterStoreParentStackName:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: CODE_CHALLENGE_PARENT_STACK_NAME
+      Type: String
+      Value:  !Sub ${AWS::StackName}
+      Description: Code Challenge Parent Stack Name
+
+  MyGitSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: HJGitHubSecret
+      Description: Access to Github
+      SecretString: !Sub '{"token": "${GITHubToken}"}'
+
+  VPCStack:
+    Condition: EnableVPCCreation
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${S3TemplatePath}/vpc-multi-tier.yml
+
+  ecsclusterpreprod:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${S3TemplatePath}/ecs-cluster.yaml
+      Parameters:
+        Environment: preprod
+
+  ecsclusterprod:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${S3TemplatePath}/ecs-cluster.yaml
+      Parameters:
+        Environment: prod
+
+  deploymentpipeline:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${S3TemplatePath}/deployment-pipeline.yaml
+      Parameters:
+        GitHubRepo: !Ref GitHubRepo
+        GitHubBranch: !Ref GitHubBranch
+        GitHubUser: !Ref GitHubUser
+        ProdCluster: !GetAtt ecsclusterprod.Outputs.Cluster
+        PreProdCluster: !GetAtt ecsclusterpreprod.Outputs.Cluster
+        ServiceNamePreProd: codechallenge-1
+        ServiceNameProd: codechallenge-2
+
+  preprodservice:
+    DependsOn: deploymentpipeline
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${S3TemplatePath}/service.yaml
+      Parameters:
+        Environment: preprod
+        Cluster: !GetAtt ecsclusterpreprod.Outputs.Cluster
+        VpcId: !If [ EnableVPCCreation, !GetAtt VPCStack.Outputs.oVpcId , !Ref VpcID ]
+        PrivateSubnets: !If [ EnableVPCCreation, !Join [ ",", [!GetAtt VPCStack.Outputs.oTier2Subnet1, !GetAtt VPCStack.Outputs.oTier2Subnet2]] , !Ref PrivateSubnets ]
+        ALBSubnets: !If [ EnableVPCCreation, !Join [ ",", [!GetAtt VPCStack.Outputs.oTier1Subnet1, !GetAtt VPCStack.Outputs.oTier1Subnet2]] , !Ref ALBSubnets ]
+
+        ServiceName: codechallenge-1
+        ImageName: !GetAtt deploymentpipeline.Outputs.ImageName
+
+  prodservice:
+    DependsOn: deploymentpipeline
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub https://${S3TemplatePath}/service.yaml
+      Parameters:
+        Environment: prod
+        Cluster: !GetAtt ecsclusterprod.Outputs.Cluster
+        VpcId: !If [ EnableVPCCreation, !GetAtt VPCStack.Outputs.oVpcId , !Ref VpcID ]
+        PrivateSubnets: !If [ EnableVPCCreation, !Join [ ",", [!GetAtt VPCStack.Outputs.oTier2Subnet1, !GetAtt VPCStack.Outputs.oTier2Subnet2]] , !Ref PrivateSubnets ]
+        ALBSubnets: !If [ EnableVPCCreation, !Join [ ",", [!GetAtt VPCStack.Outputs.oTier1Subnet1, !GetAtt VPCStack.Outputs.oTier1Subnet2]] , !Ref ALBSubnets ]
+        ServiceName: codechallenge-2
+        ImageName: !GetAtt deploymentpipeline.Outputs.ImageName

@@ -1,0 +1,322 @@
+AWSTemplateFormatVersion: 2010-09-09
+Parameters:
+  GitHubRepo:
+    Type: String
+
+  GitHubBranch:
+    Type: String
+
+  GitHubUser:
+    Type: String
+
+  ServiceNameProd:
+    Type: String
+
+  ServiceNamePreProd:
+    Type: String
+
+  ProdCluster:
+    Type: String
+
+  PreProdCluster:
+    Type: String
+
+Resources:
+  Repository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+
+  ParameterStoreECR:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: ECR_REPOSITORY_URI
+      Type: String
+      Value:  !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${Repository}
+      Description: ECR REPOSITORY URI
+
+  CloudFormationExecutionRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Retain
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument: |
+        {
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": { "Service": [ "cloudformation.amazonaws.com" ]},
+                "Action": [ "sts:AssumeRole" ]
+            }]
+        }
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource: "*"
+                Effect: Allow
+                Action:
+                  - ecs:*
+                  - ecr:*
+                  - iam:*
+                  - ec2:*
+                  - elasticloadbalancing:*
+                  - autoscaling:*
+
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument: |
+        {
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": { "Service": [ "codebuild.amazonaws.com" ]},
+                "Action": [ "sts:AssumeRole" ]
+            }]
+        }
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource: "*"
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - ecr:GetAuthorizationToken
+                  - cloudformation:*
+                  - elasticloadbalancing:Describe*
+                  - codepipeline:Get*
+                  - codebuild:BatchGetBuilds
+                  - ssm:GetParameter
+                  - codebuild:Update*
+                  - iam:PassRole
+                  - iam:Put*
+                  - iam:Get*
+              - Resource: !Sub arn:aws:s3:::${ArtifactBucket}/*
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetObjectVersion
+              - Resource: !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${Repository}
+                Effect: Allow
+                Action:
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:PutImage
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument: |
+        {
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": { "Service": [ "codepipeline.amazonaws.com" ]},
+                "Action": [ "sts:AssumeRole" ]
+            }]
+        }
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource:
+                  - !Sub arn:aws:s3:::${ArtifactBucket}/*
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketVersioning
+              - Resource: "*"
+                Effect: Allow
+                Action:
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuilds
+                  - cloudformation:*
+                  - iam:PassRole
+                  - ecs:*
+
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+
+  ParameterStoreArtifactBucket:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: S3_ARTIFACT_BUCKET
+      Type: String
+      Value:  !Ref ArtifactBucket
+      Description: S3 ArtifactBucket Name
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Artifacts:
+        Type: CODEPIPELINE
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              runtime-versions:
+                docker: 18
+            pre_build:
+              commands:
+                - echo Logging in to Amazon ECR...
+                - aws --version
+                - node --version
+                - npm --version
+                - $(aws ecr get-login --region $AWS_DEFAULT_REGION --no-include-email)
+                - REPOSITORY_URI=$(aws ssm get-parameter --name ECR_REPOSITORY_URI --query Parameter.Value | tr -d '"')
+                - s3_bucket=$(aws ssm get-parameter --name S3_ARTIFACT_BUCKET --query Parameter.Value | tr -d '"')
+                - aws s3 cp templates s3://$s3_bucket --recursive
+                - echo $REPOSITORY_URI
+                - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+                - IMAGE_TAG=${COMMIT_HASH:=latest}
+            build:
+              commands:
+                - echo Build started on `date`
+                - echo Building the Docker image...
+                - docker build -f application/Dockerfile -t $REPOSITORY_URI:latest .
+                - docker tag $REPOSITORY_URI:latest $REPOSITORY_URI:$IMAGE_TAG
+            post_build:
+              commands:
+                - echo Build completed on `date`
+                - echo Pushing the Docker images...
+                - docker push $REPOSITORY_URI:latest
+                - docker push $REPOSITORY_URI:$IMAGE_TAG
+                - echo Writing image definitions file...
+                - printf '[{"name":"codechallenge-1","imageUri":"%s"}]' $REPOSITORY_URI:$IMAGE_TAG > imagedefinitions.json
+                - printf '[{"name":"codechallenge-2","imageUri":"%s"}]' $REPOSITORY_URI:$IMAGE_TAG > imagedefinitionsprod.json
+                - cd templates
+                - bash run-infra.sh
+          artifacts:
+              files:
+                - imagedefinitions.json
+                - imagedefinitionsprod.json
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:2.0
+        Type: LINUX_CONTAINER
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: REPOSITORY_URI
+            Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${Repository}
+      Name: !Sub ${AWS::StackName}-codebuildproject
+      ServiceRole: !Ref CodeBuildServiceRole
+
+  AppPipelineWebhook:
+    Type: AWS::CodePipeline::Webhook
+    Properties:
+      Authentication: GITHUB_HMAC
+      AuthenticationConfiguration:
+        SecretToken: '{{resolve:secretsmanager:HJGitHubSecret:SecretString:token}}'
+      Filters:
+        -
+          JsonPath: "$.ref"
+          MatchEquals: refs/heads/docker
+      TargetPipeline: !Ref Pipeline
+      TargetAction: Source
+      Name: AppPipelineWebhook
+      TargetPipelineVersion: !GetAtt Pipeline.Version
+      RegisterWithThirdParty: true
+
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      RoleArn: !GetAtt CodePipelineServiceRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucket
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Version: 1
+                Provider: GitHub
+              Configuration:
+                Owner: !Ref GitHubUser
+                Repo: !Ref GitHubRepo
+                Branch: !Ref GitHubBranch
+                OAuthToken: '{{resolve:secretsmanager:HJGitHubSecret:SecretString:token}}'
+                PollForSourceChanges: false
+              OutputArtifacts:
+                - Name: Source
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: Build
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+              InputArtifacts:
+                - Name: Source
+              OutputArtifacts:
+                - Name: BuildOutput
+              RunOrder: 1
+        - Name: Preprod
+          Actions:
+            - Name: Deploy
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: ECS
+              Configuration:
+                ClusterName: !Ref PreProdCluster
+                ServiceName: !Ref ServiceNamePreProd
+                FileName: imagedefinitions.json
+              InputArtifacts:
+                - Name: BuildOutput
+              RunOrder: 1
+
+        - Name: Approval
+          Actions:
+            - Name: Approval
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Version: 1
+                Provider: Manual
+              RunOrder: 1
+
+        - Name: Production
+          Actions:
+            - Name: Deploy
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: ECS
+              Configuration:
+                ClusterName: !Ref ProdCluster
+                ServiceName: !Ref ServiceNameProd
+                FileName: imagedefinitionsprod.json
+              InputArtifacts:
+                - Name: BuildOutput
+              RunOrder: 1
+Outputs:
+  PipelineUrl:
+    Value: !Sub https://console.aws.amazon.com/codepipeline/home?region=${AWS::Region}#/view/${Pipeline}
+  ImageName:
+    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${Repository}:latest

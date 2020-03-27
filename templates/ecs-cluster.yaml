@@ -1,0 +1,21 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  Environment:
+    Type: String
+
+Resources:
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Join [ "-", ['MyCluster', !Ref Environment] ]
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+
+Outputs:
+  Cluster:
+    Description: Fargate cluster.
+    Value: !Ref Cluster
+    Export:
+      Name: !Sub '${AWS::StackName}::-Cluster-${Environment}'
