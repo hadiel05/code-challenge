@@ -26,5 +26,6 @@ jobs:
         uses: harupy/comment-on-pr@master
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TESTLIST: ${AWSS3LIST}
         with:
           filename: template.md
