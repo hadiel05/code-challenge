@@ -23,8 +23,8 @@ jobs:
           AWSS3LIST=$(aws s3 ls)
 
       - name: Add Comment to PR
-          uses: harupy/comment-on-pr@master
-          env:
-            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          with:
-            filename: template.md
+        uses: harupy/comment-on-pr@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          filename: template.md
