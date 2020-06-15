@@ -23,9 +23,9 @@ jobs:
           AWSS3LIST=$(aws s3 ls)
 
       - name: Add Comment to PR
-        uses: harupy/comment-on-pr@master
+        uses: unsplash/comment-on-pr@master
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TESTLIST: ${AWSS3LIST}
         with:
-          filename: template.md
+          msg: "Check out this message! ${AWSS3LIST}"
+          check_for_duplicate_msg: false
