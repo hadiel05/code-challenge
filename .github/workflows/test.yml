@@ -19,13 +19,16 @@ jobs:
           aws-region: us-east-1
 
       - name: Test AWS S3 List
+        id: s3liststep
         run: |
           AWSS3LIST=$(aws s3 ls)
+          echo "::set-output S3LIST=test::${AWSS3LIST}"
 
       - name: Add Comment to PR
+        if: github.event.action != 'closed'
         uses: unsplash/comment-on-pr@master
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          msg: "Check out this message! ${AWSS3LIST}"
+          msg: "Check out this message! ${{ steps.s3liststep.outputs.test }}"
           check_for_duplicate_msg: false
