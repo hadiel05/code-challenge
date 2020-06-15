@@ -23,8 +23,7 @@ jobs:
           AWSS3LIST=$(aws s3 ls)
 
       - name: Add Comment to PR
-        - uses: actions/checkout@v2
-        - uses: harupy/comment-on-pr@master
+          uses: harupy/comment-on-pr@master
           env:
             GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           with:
