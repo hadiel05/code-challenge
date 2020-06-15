@@ -1,0 +1,23 @@
+on:
+  pull_request:
+    types: [opened, closed, edited, reopened]
+
+jobs:
+  deploy:
+    name: Testing
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Configure AWS credentials from Test account
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.TEST_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.TEST_AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Test AWS S3 List
+        run: |
+          aws s3 ls
